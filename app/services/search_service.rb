@@ -34,25 +34,34 @@ class SearchService
     # Filtering on contacts via a subquery instead of an OR across the joined tables
     # lets postgres use the trigram index on contacts and skip the join entirely,
     # since an OR spanning two tables forces a full scan of both.
-    base_query = current_account.conversations.where(inbox_id: accessable_inbox_ids)
-    conversations_query = base_query.where(contact_id: matching_contact_ids)
+    scope = accessible_conversations
+    scope = apply_time_filter(scope, 'conversations.last_activity_at') if current_account.feature_enabled?('advanced_search')
+    conversations_query = scope.where(contact_id: matching_contact_ids).order('conversations.created_at DESC')
 
-    # display_id is numeric, so a search term with non-digit characters can never match it
-    if search_query.match?(/\A\d+\z/)
-      conversations_query = conversations_query.or(
-        base_query.where.not(contact_id: nil)
-                  .where('CAST(conversations.display_id AS TEXT) ILIKE :search', search: "%#{search_query}%")
-      )
-    end
+    # display_id is unique per account, so a digits-only term is a conversation number.
+    # It is looked up on its own (one unique-index probe) instead of OR-ed into the query
+    # above, which makes postgres walk every conversation of the account in created_at
+    # order because the contacts subquery cannot be bitmap-combined with the OR.
+    exact = exact_display_id_match(scope)
+    return conversations_query.page(params[:page]).per(15) unless exact
 
-    if current_account.feature_enabled?('advanced_search')
-      conversations_query = apply_time_filter(conversations_query,
-                                              'conversations.last_activity_at')
-    end
+    # The hit takes the first slot of page one; the contact matches shift by one behind it
+    # and never repeat it, so every page still holds exactly 15 rows.
+    page = [params[:page].to_i, 1].max
+    rest = conversations_query.where.not(id: exact.id)
+    page == 1 ? [exact, *rest.limit(14)] : rest.offset((page * 15) - 16).limit(15)
+  end
 
-    @conversations = conversations_query.order('conversations.created_at DESC')
-                                        .page(params[:page])
-                                        .per(15)
+  def accessible_conversations
+    current_account.conversations.where(inbox_id: accessable_inbox_ids)
+  end
+
+  def exact_display_id_match(scope)
+    # display_ids come from a sequence: no leading zero, and nine digits is far past this
+    # instance while staying inside the integer column
+    return unless search_query.match?(/\A[1-9]\d{0,8}\z/)
+
+    scope.find_by(display_id: search_query.to_i)
   end
 
   def matching_contact_ids

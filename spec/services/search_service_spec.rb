@@ -277,6 +277,35 @@ describe SearchService do
         search = described_class.new(current_user: user, current_account: account, params: params, search_type: 'Conversation')
         expect(search.perform[:conversations].map(&:id)).to include new_converstion.id
       end
+
+      it 'puts the conversation with that display id first, ahead of newer contact matches' do
+        by_number = create(:conversation, contact: harry, inbox: inbox, account: account)
+        # a contact whose phone contains the number, so the contact branch matches too
+        digits = create(:contact, account_id: account.id, name: 'digits', phone_number: "+49#{by_number.display_id}000")
+        by_phone = create(:conversation, contact: digits, inbox: inbox, account: account)
+        params = { q: by_number.display_id.to_s }
+        search = described_class.new(current_user: user, current_account: account, params: params, search_type: 'Conversation')
+        ids = search.perform[:conversations].map(&:id)
+        expect(ids.first).to eq(by_number.id)
+        expect(ids).to include(by_phone.id)
+      end
+
+      it 'keeps every page at 15 rows and never repeats the display id hit' do
+        target = create(:conversation, contact: harry, inbox: inbox, account: account)
+        digits = create(:contact, account_id: account.id, name: 'digits', phone_number: "+49#{target.display_id}000")
+        others = create_list(:conversation, 15, contact: digits, inbox: inbox, account: account)
+        results = lambda do |page|
+          params = { q: target.display_id.to_s, page: page }
+          described_class.new(current_user: user, current_account: account, params: params, search_type: 'Conversation')
+                         .perform[:conversations].map(&:id)
+        end
+        page1 = results.call(1)
+        page2 = results.call(2)
+        expect(page1.first).to eq(target.id)
+        expect(page1.size).to eq(15)
+        expect(page1 + page2).to include(*others.map(&:id))
+        expect(page1 + page2).to match_array((page1 + page2).uniq)
+      end
     end
 
     context 'when article search' do
