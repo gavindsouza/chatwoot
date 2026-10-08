@@ -30,4 +30,26 @@ describe Voice::Provider::Twilio::TokenService do
     expect(payload[:voice_enabled]).to be true
     expect(payload[:twiml_endpoint]).to include(voice_channel.phone_number.delete_prefix('+'))
   end
+
+  it 'routes the token and the browser Device to the configured Twilio region' do
+    allow(Twilio).to receive_messages(region: 'ie1', edge: 'dublin')
+    fake_token = instance_double(Twilio::JWT::AccessToken, to_jwt: 'jwt-token', add_grant: nil)
+    allow(Twilio::JWT::AccessToken).to receive(:new).and_return(fake_token)
+
+    payload = described_class.new(inbox: inbox, user: user, account: account).generate
+
+    expect(Twilio::JWT::AccessToken).to have_received(:new).with(any_args, hash_including(region: 'ie1'))
+    expect(payload[:edge]).to eq('dublin')
+  end
+
+  it 'keeps the token and the browser Device on the default region when none is configured' do
+    allow(Twilio).to receive_messages(region: nil, edge: nil)
+    fake_token = instance_double(Twilio::JWT::AccessToken, to_jwt: 'jwt-token', add_grant: nil)
+    allow(Twilio::JWT::AccessToken).to receive(:new).and_return(fake_token)
+
+    payload = described_class.new(inbox: inbox, user: user, account: account).generate
+
+    expect(Twilio::JWT::AccessToken).to have_received(:new).with(any_args, hash_including(region: nil))
+    expect(payload[:edge]).to be_nil
+  end
 end

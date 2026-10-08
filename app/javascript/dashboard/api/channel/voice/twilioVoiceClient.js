@@ -16,13 +16,14 @@ class TwilioVoiceClient extends EventTarget {
     this.destroyDevice();
 
     const response = await VoiceAPI.getToken(inboxId);
-    const { token, account_id } = response || {};
+    const { token, account_id, edge } = response || {};
     if (!token) throw new Error('Invalid token');
 
     this.device = new Device(token, {
       allowIncomingWhileBusy: true,
       disableAudioContextSounds: true,
       appParams: { account_id },
+      ...(edge && { edge }),
     });
 
     this.device.removeAllListeners();
