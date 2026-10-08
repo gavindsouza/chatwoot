@@ -12,7 +12,8 @@ class Voice::Provider::Twilio::TokenService
       inbox_id: inbox.id,
       phone_number: channel.phone_number,
       twiml_endpoint: twiml_url,
-      has_twiml_app: channel.twiml_app_sid.present?
+      has_twiml_app: channel.twiml_app_sid.present?,
+      edge: Twilio.edge
     }
   end
 
@@ -32,7 +33,8 @@ class Voice::Provider::Twilio::TokenService
       channel.api_key_sid,
       channel.api_key_secret,
       identity: identity,
-      ttl: 1.hour.to_i
+      ttl: 1.hour.to_i,
+      region: Twilio.region
     ).tap { |token| token.add_grant(voice_grant) }
   end
 
