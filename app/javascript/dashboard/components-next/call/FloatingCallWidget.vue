@@ -62,6 +62,12 @@ const stackedCardState = call =>
     ? VOICE_CALL_DIRECTION.OUTGOING
     : VOICE_CALL_DIRECTION.INCOMING;
 
+// ponytail: decline on a ringing incoming call only dismisses it for this agent, delete when Chatwoot ships per-agent decline
+const declineCall = call =>
+  call?.callDirection === VOICE_CALL_DIRECTION.OUTBOUND
+    ? rejectIncomingCall(call.callSid)
+    : dismissCall(call?.callSid);
+
 const toggleMute = () => {
   isMuted.value = !isMuted.value;
   if (isWhatsappActive.value) {
@@ -248,7 +254,7 @@ onBeforeUnmount(stopRingtone);
       :state="stackedCardState(call)"
       :call-info="getCallInfo(call)"
       @accept="handleJoinCall(call)"
-      @reject="rejectIncomingCall(call.callSid)"
+      @reject="declineCall(call)"
       @dismiss="dismissCall(call.callSid)"
       @go-to-conversation="goToConversation(call)"
     />
@@ -263,7 +269,7 @@ onBeforeUnmount(stopRingtone);
       :is-muted="isMuted"
       :show-mute="hasActiveCall"
       @accept="handleJoinCall(primaryIncomingCall)"
-      @reject="rejectIncomingCall(primaryIncomingCall?.callSid)"
+      @reject="declineCall(primaryIncomingCall)"
       @dismiss="dismissCall(primaryIncomingCall?.callSid)"
       @end="handleEndCall"
       @toggle-mute="toggleMute"

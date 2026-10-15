@@ -37,6 +37,8 @@ let storedCallsStoreRef = null;
 // see one in-flight join, not two unrelated isJoining refs.
 const globalIsJoining = ref(false);
 const globalIsJoiningReadonly = readonly(globalIsJoining);
+// ponytail: dismissing a call clears it from the agent's other tabs too, delete when Chatwoot ships per-agent decline
+let dismissChannel = null;
 
 const handleBeforeUnloadGlobal = event => {
   const store = storedCallsStoreRef;
@@ -60,6 +62,14 @@ const attachGlobalsOnFirstMount = callsStore => {
     'call:disconnected',
     handleTwilioDisconnectedGlobal
   );
+  dismissChannel = new BroadcastChannel('cw-call-dismissed');
+  dismissChannel.onmessage = ({ data: callSid }) => {
+    markCallDismissed(callSid);
+    // The tab that joined the call keeps it
+    if (callsStore.activeCall?.callSid !== callSid) {
+      callsStore.dismissCall(callSid);
+    }
+  };
   window.addEventListener('beforeunload', handleBeforeUnloadGlobal);
   window.addEventListener('pagehide', handlePageHideGlobal);
 };
@@ -71,6 +81,8 @@ const detachGlobalsOnLastUnmount = () => {
   globalDurationTimer = null;
   globalCallDuration.value = 0;
   storedCallsStoreRef = null;
+  dismissChannel?.close();
+  dismissChannel = null;
   TwilioVoiceClient.removeEventListener(
     'call:disconnected',
     handleTwilioDisconnectedGlobal
@@ -228,6 +240,7 @@ const buildCallActions = ({ callsStore, whatsappSession, t }) => {
   const dismissCall = callSid => {
     markCallDismissed(callSid);
     callsStore.dismissCall(callSid);
+    dismissChannel?.postMessage(callSid);
   };
 
   return { endCall, joinCall, rejectIncomingCall, dismissCall };
