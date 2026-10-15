@@ -55,8 +55,8 @@ class Call < ApplicationRecord
 
   has_one_attached :recording
 
-  # Snapshot the inbox's "Record calls" setting so every leg of a call agrees and a mid-call toggle can't change it.
-  before_create { self.recording_enabled = inbox.channel.try(:recording_enabled?) }
+  # ponytail: stamp every call not-recorded, whatever its inbox says, delete when Chatwoot ships an install-wide recording off switch
+  before_create { self.recording_enabled = false }
 
   validates :provider_call_id, presence: true
   validates :provider, presence: true

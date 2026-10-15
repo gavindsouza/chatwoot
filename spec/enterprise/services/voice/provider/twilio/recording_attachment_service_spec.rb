@@ -13,6 +13,7 @@ RSpec.describe Voice::Provider::Twilio::RecordingAttachmentService do
   end
   let(:inbox) { channel.inbox }
   let(:conversation) { create(:conversation, account: account, inbox: inbox) }
+  # Every new call is stamped not-recorded; switch it back on to exercise the service itself.
   let(:call) do
     create(
       :call,
@@ -20,7 +21,7 @@ RSpec.describe Voice::Provider::Twilio::RecordingAttachmentService do
       inbox: inbox,
       conversation: conversation,
       contact: conversation.contact
-    )
+    ).tap { |call| call.update!(recording_enabled: true) }
   end
   let!(:message) do
     msg = conversation.messages.create!(

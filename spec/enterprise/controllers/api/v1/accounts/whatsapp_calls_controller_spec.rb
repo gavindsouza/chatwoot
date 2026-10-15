@@ -49,15 +49,11 @@ RSpec.describe 'WhatsApp Calls API', type: :request do
       expect(response).to have_http_status(:unauthorized)
     end
 
-    # acceptIncomingCall falls back to this payload when the ring broadcast raced the agent's click,
-    # so it must report the decision taken when the call started, not the inbox's current flag.
-    it 'reports the recording decision taken when the call started' do
-      call # created while the inbox still had recording on
-      channel.update!(provider_config: channel.provider_config.merge('recording_enabled' => false))
-
+    # acceptIncomingCall falls back to this payload when the ring broadcast raced the agent's click.
+    it 'reports recording off, even for a call created while the inbox had recording on' do
       get "/api/v1/accounts/#{account.id}/whatsapp_calls/#{call.id}", headers: agent.create_new_auth_token
 
-      expect(response.parsed_body['recording_enabled']).to be true
+      expect(response.parsed_body['recording_enabled']).to be false
     end
   end
 
@@ -300,33 +296,8 @@ RSpec.describe 'WhatsApp Calls API', type: :request do
       call.update!(message_id: message.id)
     end
 
-    it 'attaches the recording to the call message' do
-      file = fixture_file_upload(Rails.root.join('spec/assets/sample.mp3'), 'audio/mpeg')
-
-      expect do
-        post "/api/v1/accounts/#{account.id}/whatsapp_calls/#{call.id}/upload_recording",
-             params: { recording: file }, headers: agent.create_new_auth_token
-      end.to change { call.message.attachments.count }.by(1)
-
-      expect(response).to have_http_status(:ok)
-      expect(response.parsed_body['status']).to eq('uploaded')
-    end
-
-    it 'is idempotent: returns already_uploaded if an audio attachment exists' do
-      call.message.attachments.create!(account_id: account.id, file_type: :audio,
-                                       file: fixture_file_upload(Rails.root.join('spec/assets/sample.mp3'), 'audio/mpeg'))
-
-      post "/api/v1/accounts/#{account.id}/whatsapp_calls/#{call.id}/upload_recording",
-           params: { recording: fixture_file_upload(Rails.root.join('spec/assets/sample.mp3'), 'audio/mpeg') },
-           headers: agent.create_new_auth_token
-
-      expect(response.parsed_body['status']).to eq('already_uploaded')
-    end
-
     # The browser gate ships in JS, so a stale tab could still post audio for a call that decided not to record.
-    it 'refuses to store audio for a call created with recording off' do
-      call.update!(recording_enabled: false)
-
+    it 'refuses to store audio, even for a call created while the inbox had recording on' do
       expect do
         post "/api/v1/accounts/#{account.id}/whatsapp_calls/#{call.id}/upload_recording",
              params: { recording: fixture_file_upload(Rails.root.join('spec/assets/sample.mp3'), 'audio/mpeg') },

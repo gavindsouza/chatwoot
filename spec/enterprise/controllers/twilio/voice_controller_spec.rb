@@ -51,15 +51,16 @@ RSpec.describe 'Twilio::VoiceController', type: :request do
       expect(response.body).to include(call.conference_sid)
     end
 
-    # An inbox that predates the setting carries no key in provider_config and must keep recording.
-    it 'records the conference from the start when the call was created with recording on' do
+    it 'never records the conference, even on an inbox with recording on' do
+      channel.update!(provider_config: channel.provider_config.merge('recording_enabled' => true))
       conversation = create(:conversation, account: account, inbox: inbox)
       call = create(:call, account: account, inbox: inbox, conversation: conversation, contact: conversation.contact, provider_call_id: call_sid)
       allow(Voice::InboundCallBuilder).to receive(:perform!).and_return(call)
 
       post "/twilio/voice/call/#{digits}", params: inbound_call_params
 
-      expect(response.body).to include('record="record-from-start"')
+      expect(response.body).to include('record="do-not-record"')
+      expect(call.reload.meta['recording_enabled']).to be(false)
     end
 
     it 'does not record the conference when the call was created with recording off' do
@@ -308,6 +309,20 @@ RSpec.describe 'Twilio::VoiceController', type: :request do
       inbox.update!(greeting_enabled: false)
       get "/twilio/voice/wait/#{digits}", params: { greet: 1 }
       expect(Nokogiri::XML(response.body).at_xpath('/Response/Say')).to be_nil
+    end
+  end
+
+  describe 'POST /twilio/voice/recording_status/:phone' do
+    it 'ignores the callback and queues no recording fetch' do
+      conversation = create(:conversation, account: account, inbox: inbox)
+      create(:call, account: account, inbox: inbox, conversation: conversation, contact: conversation.contact, twilio_conference_sid: 'CF1')
+
+      expect do
+        post "/twilio/voice/recording_status/#{digits}",
+             params: { 'RecordingStatus' => 'completed', 'ConferenceSid' => 'CF1', 'RecordingSid' => 'RE1', 'RecordingUrl' => 'https://example.com/r' }
+      end.not_to have_enqueued_job(Voice::Provider::Twilio::RecordingAttachmentJob)
+
+      expect(response).to have_http_status(:no_content)
     end
   end
 

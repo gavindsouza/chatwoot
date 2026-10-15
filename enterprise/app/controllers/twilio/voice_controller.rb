@@ -65,12 +65,8 @@ class Twilio::VoiceController < ApplicationController # rubocop:disable Metrics/
     head :no_content
   end
 
+  # ponytail: ignore the unsigned callback, never fetch its RecordingUrl, delete when Chatwoot ships an install-wide recording off switch
   def recording_status
-    Voice::RecordingStatusService.new(
-      account: current_account,
-      payload: params.to_unsafe_h
-    ).perform
-
     head :no_content
   end
 
