@@ -73,6 +73,58 @@ RSpec.describe 'Twilio::VoiceController', type: :request do
       expect(response.body).to include('record="do-not-record"')
     end
 
+    context 'with the caller audio' do
+      let(:conversation) { create(:conversation, account: account, inbox: inbox) }
+      let(:call) do
+        create(:call, account: account, inbox: inbox, conversation: conversation, contact: conversation.contact, provider_call_id: call_sid)
+      end
+
+      before { allow(Voice::InboundCallBuilder).to receive(:perform!).and_return(call) }
+
+      def xml = Nokogiri::XML(response.body)
+
+      it 'puts the caller straight into the conference with a greeting-and-ringback wait and no beep' do
+        inbox.update!(greeting_enabled: true, greeting_message: 'Willkommen')
+
+        post "/twilio/voice/call/#{digits}", params: inbound_call_params
+
+        expect(xml.at_xpath('/Response/Say')).to be_nil
+        expect(xml.at_xpath('/Response').elements.map(&:name)).to eq(['Dial'])
+        conference = xml.at_xpath('/Response/Dial/Conference')
+        expect(conference['waitUrl']).to eq("http://localhost:3000/twilio/voice/wait/#{digits}?greet=1")
+        expect(conference['waitMethod']).to eq('GET')
+        expect(conference['beep']).to eq('false')
+      end
+
+      it 'does not ask for the greeting on the contact leg of an outbound call' do
+        inbox.update!(greeting_enabled: true, greeting_message: 'Willkommen')
+        call.update!(direction: :outgoing)
+
+        post "/twilio/voice/call/#{digits}",
+             params: { 'CallSid' => call_sid, 'From' => to_number, 'To' => from_number, 'Direction' => 'outbound-api' }
+
+        expect(xml.at_xpath('/Response/Say')).to be_nil
+        conference = xml.at_xpath('/Response/Dial/Conference')
+        expect(conference['waitUrl']).to eq("http://localhost:3000/twilio/voice/wait/#{digits}")
+        expect(conference['waitMethod']).to eq('GET')
+      end
+
+      it 'leaves the agent leg without a greeting or custom wait audio, and silences its join beep' do
+        inbox.update!(greeting_enabled: true, greeting_message: 'Willkommen')
+        call.update!(status: 'ringing')
+
+        post "/twilio/voice/call/#{digits}", params: {
+          'CallSid' => 'CA_agent_leg', 'From' => "client:agent-1-account-#{account.id}", 'To' => to_number,
+          'Direction' => 'inbound', 'call_sid' => call_sid
+        }
+
+        expect(xml.at_xpath('/Response/Say')).to be_nil
+        conference = xml.at_xpath('/Response/Dial/Conference')
+        expect(conference.attributes.keys).not_to include('waitUrl', 'waitMethod')
+        expect(conference['beep']).to eq('false')
+      end
+    end
+
     it 'looks up the Call when Twilio sends the outbound-api PSTN leg' do
       conversation = create(:conversation, account: account, inbox: inbox)
       call = create(
@@ -219,6 +271,43 @@ RSpec.describe 'Twilio::VoiceController', type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(response.body).to include('<Reject')
+    end
+  end
+
+  describe 'GET /twilio/voice/wait/:phone' do
+    it 'loops the shipped ringback tone from an absolute URL' do
+      get "/twilio/voice/wait/#{digits}"
+
+      expect(response).to have_http_status(:ok)
+      xml = Nokogiri::XML(response.body)
+      expect(xml.at_xpath('/Response/Say')).to be_nil
+      play = xml.at_xpath('/Response/Play')
+      expect(play['loop']).to eq('0')
+      expect(play.text).to eq('http://localhost:3000/audio/voice/ringback-de.wav')
+      expect(Rails.public_path.join('audio/voice/ringback-de.wav')).to exist
+    end
+
+    it 'speaks the plain-text greeting before the ringback when asked to' do
+      account.update!(locale: 'de')
+      inbox.update!(greeting_enabled: true, greeting_message: 'Willkommen bei **SwitchUp** <b>Support</b>')
+
+      get "/twilio/voice/wait/#{digits}", params: { greet: 1 }
+
+      xml = Nokogiri::XML(response.body)
+      say = xml.at_xpath('/Response/Say')
+      expect(say.text).to eq('Willkommen bei SwitchUp Support')
+      expect(say['language']).to eq('de-DE')
+      expect(say.next_element.name).to eq('Play')
+    end
+
+    it 'stays silent without the greet flag or with the greeting off' do
+      inbox.update!(greeting_enabled: true, greeting_message: 'Willkommen')
+      get "/twilio/voice/wait/#{digits}"
+      expect(Nokogiri::XML(response.body).at_xpath('/Response/Say')).to be_nil
+
+      inbox.update!(greeting_enabled: false)
+      get "/twilio/voice/wait/#{digits}", params: { greet: 1 }
+      expect(Nokogiri::XML(response.body).at_xpath('/Response/Say')).to be_nil
     end
   end
 

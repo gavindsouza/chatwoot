@@ -1,4 +1,4 @@
-class Twilio::VoiceController < ApplicationController
+class Twilio::VoiceController < ApplicationController # rubocop:disable Metrics/ClassLength
   CONFERENCE_EVENT_PATTERNS = {
     /conference-start/i => 'start',
     /participant-join/i => 'join',
@@ -31,6 +31,15 @@ class Twilio::VoiceController < ApplicationController
     return render xml: hangup_twiml unless open_leg?(call)
 
     render xml: conference_twiml(call)
+  end
+
+  # The caller's wait audio: the greeting if asked for, then the ringback (a raw WAV as waitUrl would play once, then silence).
+  def wait_twiml
+    response = Twilio::TwiML::VoiceResponse.new.tap do |twiml|
+      greet_caller(twiml) if params[:greet].present?
+      twiml.play(url: ringback_url, loop: 0)
+    end
+    render xml: response.to_s
   end
 
   def conference_status
@@ -147,13 +156,14 @@ class Twilio::VoiceController < ApplicationController
     Call.where(inbox_id: inbox.id, provider: :twilio)
   end
 
-  def conference_twiml(call)
+  def conference_twiml(call) # rubocop:disable Metrics/MethodLength
     conference_sid = ensure_conference_sid!(call)
 
     Twilio::TwiML::VoiceResponse.new.tap do |response|
       response.dial do |dial|
         dial.conference(
           conference_sid,
+          beep: false,
           start_conference_on_enter: agent_leg?(twilio_from),
           end_conference_on_exit: false,
           record: call.recording_enabled? ? 'record-from-start' : 'do-not-record',
@@ -163,10 +173,33 @@ class Twilio::VoiceController < ApplicationController
           status_callback: conference_status_callback_url,
           status_callback_event: 'start end join leave',
           status_callback_method: 'POST',
-          participant_label: participant_label_for(twilio_from)
+          participant_label: participant_label_for(twilio_from),
+          **caller_wait_options(call)
         )
       end
     end.to_s
+  end
+
+  # ponytail: German ringback wait, no join beep and the inbox greeting for callers, delete when Chatwoot ships configurable voice inbox audio
+  # The greeting is spoken from the wait doc so the caller is already in the conference while it plays; only inbound calls get it.
+  def caller_wait_options(call)
+    return {} if agent_leg?(twilio_from)
+
+    phone_digits = inbox_channel.phone_number.delete_prefix('+')
+    wait_url = Rails.application.routes.url_helpers.twilio_voice_wait_url(phone: phone_digits, greet: (1 if call.incoming?))
+    { wait_url: wait_url, wait_method: 'GET' }
+  end
+
+  def ringback_url
+    "#{Rails.application.routes.default_url_options[:host]}/audio/voice/ringback-de.wav"
+  end
+
+  def greet_caller(response)
+    return unless inbox.greeting_enabled? && inbox.greeting_message.present?
+
+    text = ChatwootMarkdownRenderer.new(inbox.greeting_message).render_markdown_to_plain_text.strip
+    options = inbox_account.locale_de? ? { language: 'de-DE', voice: 'Polly.Vicki-Neural' } : {}
+    response.say(message: text, **options)
   end
 
   def ensure_conference_sid!(call)
