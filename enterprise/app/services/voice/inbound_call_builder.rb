@@ -91,7 +91,8 @@ class Voice::InboundCallBuilder
   end
 
   def resolve_conversation!(contact, contact_inbox)
-    reusable = reusable_conversation(contact_inbox)
+    # ponytail: new conversation per Twilio call (rings all agents if auto-assignment is off), delete when Chatwoot ships assign-to-whoever-answers
+    reusable = reusable_conversation(contact_inbox) if whatsapp_provider?
     return reusable if reusable
 
     account.conversations.create!(

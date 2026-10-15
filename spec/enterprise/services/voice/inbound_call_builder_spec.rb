@@ -162,6 +162,25 @@ RSpec.describe Voice::InboundCallBuilder do
     end
   end
 
+  context 'when the same number calls again' do
+    it 'creates a new conversation for each call, even while the previous one is unresolved' do
+      inbox.update!(enable_auto_assignment: false) # with it on, assignment picks an agent and only that agent rings
+      first = described_class.perform!(inbox: inbox, call_sid: 'CAfirst', caller: { source_ids: [from_number] })
+      second = described_class.perform!(inbox: inbox, call_sid: 'CAsecond', caller: { source_ids: [from_number] })
+
+      expect(first.conversation).not_to eq(second.conversation)
+      expect(first.conversation.reload).to be_open
+      expect(second.conversation.assignee).to be_nil
+    end
+
+    it 'reuses the conversation when Twilio retries the same call sid' do
+      first = perform_builder
+
+      expect { perform_builder }.not_to change(account.conversations, :count)
+      expect(perform_builder.conversation).to eq(first.conversation)
+    end
+  end
+
   context 'when a ContactInbox already exists for the source_id (different contact)' do
     let!(:original_contact) { create(:contact, account: account, phone_number: '+15550009999') }
     let!(:original_contact_inbox) do
@@ -224,6 +243,20 @@ RSpec.describe Voice::InboundCallBuilder do
       expect(phone_conversation.reload.contact_inbox_id).to eq(phone_contact_inbox.id)
     end
 
+    it 'reuses the most recent non-resolved conversation of the identity' do
+      open_conversation = create(:conversation, account: account, inbox: whatsapp_inbox, contact: stored_contact,
+                                                contact_inbox: stored_contact_inbox, status: :open)
+
+      call = described_class.perform!(
+        inbox: whatsapp_inbox,
+        call_sid: 'wacall_reuse_open',
+        provider: :whatsapp,
+        caller: { source_ids: ['IN.2081978709342942'], contact_attributes: { name: 'Ada Lovelace' } }
+      )
+
+      expect(call.conversation).to eq(open_conversation)
+    end
+
     # The lower-level builder honors the leading source_id it is given. The WhatsApp-specific
     # identity builder decides whether that should be the phone or BSUID for a real webhook.
     it 'creates the preferred contact inbox when the caller only had a secondary alias' do
@@ -270,15 +303,10 @@ RSpec.describe Voice::InboundCallBuilder do
 
     before { inbox.update!(lock_to_single_conversation: true) }
 
-    it 'reuses the most recent non-resolved conversation' do
+    it 'still creates a new conversation for a Twilio call' do
       call = nil
-      expect { call = perform_builder }.not_to change(account.conversations, :count)
-      expect(call.conversation).to eq(existing_open_conversation)
-    end
-
-    it 'still creates a new Call and voice_call message on the reused conversation' do
-      expect { perform_builder }.to change(Call, :count).by(1)
-                                                        .and change { existing_open_conversation.reload.messages.voice_calls.count }.by(1)
+      expect { call = perform_builder }.to change(account.conversations, :count).by(1)
+      expect(call.conversation).not_to eq(existing_open_conversation)
     end
   end
 end
