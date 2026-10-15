@@ -62,6 +62,22 @@ describe Voice::Provider::Twilio::ConferenceService do
       expect(call.reload.agent_legs.keys).to contain_exactly('CA-live', Call.pending_agent_leg('attempt-2'))
     end
 
+    it 'records when the call was claimed, again on a retry, so the ring timeout gives each join its time' do
+      agent = create(:user, account: account)
+      call.update!(accepted_by_agent: agent, ring_state: { 'claimed_at' => 5.minutes.ago.to_i, 'ring_recipient_ids' => [] })
+
+      service.mark_agent_joined(user: agent)
+
+      expect(call.reload.ring_state).to include('claimed_at' => be_within(2).of(Time.zone.now.to_i), 'ring_recipient_ids' => [])
+    end
+
+    it 'refuses a claim while the ring timeout is moving the caller out' do
+      call.update!(ring_state: { 'timing_out_at' => Time.zone.now.to_i })
+
+      expect { service.mark_agent_joined(user: create(:user, account: account)) }.to raise_error(Voice::CallErrors::CallAlreadyEnded)
+      expect(call.reload.accepted_by_agent_id).to be_nil
+    end
+
     it 'holds no place for a client that names no attempt' do
       service.mark_agent_joined(user: create(:user, account: account))
 

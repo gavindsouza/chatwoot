@@ -39,7 +39,10 @@ class Voice::CallStatus::Manager
       Call::TERMINAL_STATUSES.include?(call.status) ||
       # A call that was answered does not ring again; a late or replayed ringing status
       # would otherwise undo the answer
-      (status == 'ringing' && call.in_progress?)
+      (status == 'ringing' && call.in_progress?) ||
+      # The ring timeout is moving the caller out and records the outcome itself; the
+      # statuses that move triggers would otherwise land first. An agent's answer still lands.
+      (status != 'in_progress' && call.ringing? && call.ring_timeout_in_progress?)
   end
 
   def apply_call_updates!(status, duration:, timestamp:)

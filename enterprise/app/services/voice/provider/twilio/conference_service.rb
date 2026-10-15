@@ -1,5 +1,6 @@
 class Voice::Provider::Twilio::ConferenceService
-  pattr_initialize [:call!]
+  # `client` is the channel's own unless given, e.g. one whose requests time out sooner
+  pattr_initialize [:call!, :client]
 
   def ensure_conference_sid
     return call.conference_sid if call.conference_sid.present?
@@ -81,14 +82,24 @@ class Voice::Provider::Twilio::ConferenceService
   # The agent's connection is on its way from here, before Twilio asks for its instructions
   def claim_call!(user, attempt)
     call.with_lock do
+      # The ring timeout is moving the caller out, so the join would find nobody to answer
+      raise Voice::CallErrors::CallAlreadyEnded, 'Call has timed out' if call.ringing? && call.ring_timeout_in_progress?
+
       raise_already_accepted!(call.accepted_by_agent) if claimed_by_other_agent?(user)
       call.update!(accepted_by_agent: user) if call.accepted_by_agent_id != user.id
+      record_claim_time!
       next if attempt.blank?
 
       # A newer attempt replaces older ones, which may never have reached Twilio
       call.retire_pending_agent_legs!
       call.record_agent_leg!(Call.pending_agent_leg(attempt), 'joining')
     end
+  end
+
+  # When it was last claimed, a retry by the same agent included, so the ring timeout gives
+  # each join its time from that moment
+  def record_claim_time!
+    Call.where(id: call.id).update_all(['ring_state = ring_state || ?::jsonb', { 'claimed_at' => Time.zone.now.to_i }.to_json]) # rubocop:disable Rails/SkipsModelValidations
   end
 
   def claimed_by_other_agent?(user)

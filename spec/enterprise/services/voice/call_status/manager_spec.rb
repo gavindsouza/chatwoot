@@ -14,6 +14,17 @@ RSpec.describe Voice::CallStatus::Manager do
     expect(call.reload).to have_attributes(status: 'rejected', end_reason: 'agent_rejected')
   end
 
+  it 'leaves a call the ring timeout is ending for it to record, while an answer still lands' do
+    call.update!(ring_state: { 'timing_out_at' => Time.zone.now.to_i })
+
+    described_class.new(call: call).process_status_update('completed')
+    described_class.new(call: call).process_status_update('no_answer')
+    expect(call.reload.status).to eq('ringing')
+
+    described_class.new(call: call).process_status_update('in_progress')
+    expect(call.reload.status).to eq('in_progress')
+  end
+
   it 'keeps an answered call live when a late ringing status arrives' do
     call.update!(status: 'in_progress')
 
