@@ -51,6 +51,13 @@ RSpec.describe 'Twilio::VoiceController', type: :request do
       expect(response.body).to include(call.conference_sid)
     end
 
+    it 'answers a withheld caller with conference TwiML' do
+      post "/twilio/voice/call/#{digits}", params: inbound_call_params.merge('From' => 'anonymous')
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include('<Dial>', Call.find_by!(provider_call_id: call_sid).conference_sid)
+    end
+
     it 'never records the conference, even on an inbox with recording on' do
       channel.update!(provider_config: channel.provider_config.merge('recording_enabled' => true))
       conversation = create(:conversation, account: account, inbox: inbox)

@@ -66,6 +66,36 @@ RSpec.describe Voice::InboundCallBuilder do
     end
   end
 
+  context 'when the Twilio caller withholds their number' do
+    let(:from_number) { 'anonymous' }
+
+    def perform_withheld(sid, from)
+      described_class.perform!(inbox: inbox, call_sid: sid, caller: { source_ids: [from], contact_attributes: { name: from, phone_number: from } })
+    end
+
+    it 'gives each withheld call its own phone-less contact and conversation, named in the account language' do
+      account.update!(locale: 'de')
+      first = perform_builder
+      second = perform_withheld('CA_withheld_2', '+266696687')
+
+      aggregate_failures do
+        expect(second.contact).not_to eq(first.contact)
+        expect(second.conversation).not_to eq(first.conversation)
+        expect([first.contact.phone_number, second.contact.phone_number]).to all(be_nil)
+        expect(first.contact.name).to eq('Unbekannte Nummer')
+        expect(first.conversation.contact_inbox.source_id).to eq("anonymous:#{call_sid}")
+        expect([first.meta['withheld_from'], second.meta['withheld_from']]).to eq(['anonymous', '+266696687'])
+      end
+    end
+
+    it 'finds the same call when Twilio retries the call sid' do
+      call = perform_builder
+
+      expect { perform_withheld(call_sid, '') }.not_to change(Call, :count)
+      expect(perform_builder).to eq(call)
+    end
+  end
+
   context 'when ringing phones' do
     it 'enqueues the ring push once the call is committed, when the account has both voice features' do
       account.enable_features!('channel_voice', 'mobile_voice_push')

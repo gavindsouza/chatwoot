@@ -24,6 +24,7 @@ class Voice::InboundCallBuilder
     @extra_meta = extra_meta || {}
     @source_ids = Array(caller[:source_ids]).compact_blank
     @contact_attributes = caller[:contact_attributes] || {}
+    withhold_twilio_caller
   end
 
   def perform!
@@ -52,6 +53,17 @@ class Voice::InboundCallBuilder
 
   def account
     inbox.account
+  end
+
+  # ponytail: a withheld Twilio caller gets a phone-less contact of its own per call, delete when Chatwoot ships withheld caller handling
+  def withhold_twilio_caller
+    from = source_ids.first.to_s
+    return unless provider == :twilio
+    return if from.match?(/\A\+[1-9]\d{1,14}\z/) && %w[+266696687 +86282452253 +8656696 +2562533 +7378742833].exclude?(from)
+
+    @source_ids = ["anonymous:#{call_sid}"]
+    @contact_attributes = { name: account.locale == 'de' ? 'Unbekannte Nummer' : 'Unknown caller' }
+    @extra_meta = extra_meta.merge('withheld_from' => from)
   end
 
   # Phones without a live socket learn about the call through a push. The agents rung are
