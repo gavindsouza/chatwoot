@@ -273,6 +273,48 @@ RSpec.describe 'Twilio::VoiceController', type: :request do
       expect(response).to have_http_status(:ok)
       expect(response.body).to include('<Reject')
     end
+
+    context 'when the inbox keeps working hours' do
+      let(:account) { create(:account, locale: 'de') }
+      let(:today) { inbox.working_hours.find_by(day_of_week: Time.current.in_time_zone(inbox.timezone).wday) }
+
+      before { inbox.update!(working_hours_enabled: true, out_of_office_message: "**Wir** haben _geschlossen_.\n\nBis morgen!") }
+
+      it 'connects the caller within working hours' do
+        today.update!(open_all_day: true, closed_all_day: false)
+
+        post "/twilio/voice/call/#{digits}", params: inbound_call_params
+
+        expect(response.body).to include('<Dial>')
+      end
+
+      context 'when it is closed' do
+        before { today.update!(open_all_day: false, closed_all_day: true) }
+
+        it 'says the out-of-office message and hangs up, recording a missed call that never rings' do
+          expect { post "/twilio/voice/call/#{digits}", params: inbound_call_params }
+            .to have_enqueued_job(ActionCableBroadcastJob)
+            .with(anything, 'message.created', hash_including(call: hash_including(status: 'no-answer')))
+
+          expect(response.body).to include('<Say language="de-DE" voice="Polly.Vicki-Neural">Wir haben geschlossen. Bis morgen!</Say>')
+          expect(response.body).to include('<Hangup/>')
+          expect(response.body).not_to include('<Conference')
+          expect(Call.find_by(provider_call_id: call_sid)).to have_attributes(status: 'no_answer', end_reason: 'out_of_office')
+        end
+
+        it 'still connects an agent leg' do
+          conversation = create(:conversation, account: account, inbox: inbox)
+          create(:call, account: account, inbox: inbox, conversation: conversation, contact: conversation.contact, provider_call_id: call_sid)
+
+          post "/twilio/voice/call/#{digits}", params: {
+            'CallSid' => 'CA_agent_leg', 'From' => "client:agent-1-account-#{account.id}", 'To' => to_number,
+            'Direction' => 'inbound', 'call_sid' => call_sid
+          }
+
+          expect(response.body).to include('<Conference')
+        end
+      end
+    end
   end
 
   describe 'GET /twilio/voice/wait/:phone' do

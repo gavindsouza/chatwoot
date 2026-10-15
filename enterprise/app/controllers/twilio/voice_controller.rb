@@ -5,6 +5,11 @@ class Twilio::VoiceController < ApplicationController # rubocop:disable Metrics/
     /participant-leave/i => 'leave',
     /conference-end/i => 'end'
   }.freeze
+  # The <Say> voice for each language, and what it says when the inbox has no out-of-office message
+  OUT_OF_OFFICE_SAY = {
+    'de-DE' => ['Polly.Vicki-Neural', 'Wir sind gerade nicht erreichbar. Bitte rufen Sie zu unseren Geschäftszeiten wieder an.'],
+    'en-US' => ['Polly.Joanna-Neural', 'We are closed right now. Please call again during our business hours.']
+  }.freeze
 
   before_action :set_inbox!
 
@@ -25,6 +30,8 @@ class Twilio::VoiceController < ApplicationController # rubocop:disable Metrics/
     )
 
     return render xml: reject_twiml if reject_inbound?
+    # ponytail: callers outside working hours hear the out-of-office message and are hung up, delete when Chatwoot ships working hours for voice
+    return render xml: out_of_office_twiml if out_of_office_inbound?
 
     call = resolve_call
     # The leg was answered after the call ended (e.g. hangup raced the cancel); don't strand it in an empty conference.
@@ -110,6 +117,25 @@ class Twilio::VoiceController < ApplicationController # rubocop:disable Metrics/
 
   def hangup_twiml
     Twilio::TwiML::VoiceResponse.new(&:hangup).to_s
+  end
+
+  def out_of_office_inbound?
+    twilio_direction == 'inbound' && !agent_leg?(twilio_from) && inbox.out_of_office?
+  end
+
+  # The call is ended in the transaction that creates it, so its message and conversation are
+  # first broadcast with it already ended and no browser or phone rings; it stays in the call
+  # history as missed
+  def out_of_office_twiml
+    ActiveRecord::Base.transaction { resolve_call.update!(status: 'no_answer', end_reason: 'out_of_office', ended_at: Time.zone.now.to_i) }
+    language = inbox_account.locale.to_s.start_with?('de') ? 'de-DE' : 'en-US'
+    voice, fallback = OUT_OF_OFFICE_SAY[language]
+    text = ChatwootMarkdownRenderer.new(inbox.out_of_office_message.to_s).render_markdown_to_plain_text.squish.presence || fallback
+
+    Twilio::TwiML::VoiceResponse.new do |response|
+      response.say(message: text, language: language, voice: voice)
+      response.hangup
+    end.to_s
   end
 
   def resolve_call
