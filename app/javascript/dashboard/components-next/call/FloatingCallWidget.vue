@@ -7,6 +7,7 @@ import { setWhatsappCallMuted } from 'dashboard/composables/useWhatsappCallSessi
 import TwilioVoiceClient from 'dashboard/api/channel/voice/twilioVoiceClient';
 import { frontendURL, conversationUrl } from 'dashboard/helper/URLHelper';
 import { VOICE_CALL_PROVIDERS } from 'dashboard/helper/inbox';
+import { markLocalCall } from 'dashboard/helper/voice';
 import { VOICE_CALL_DIRECTION } from 'dashboard/components-next/message/constants';
 import WindowVisibilityHelper from 'dashboard/helper/AudioAlerts/WindowVisibilityHelper';
 import CallCard from 'dashboard/components-next/call/CallCard.vue';
@@ -167,6 +168,9 @@ const handleJoinCall = async call => {
   const { conversation } = getCallInfo(call);
 
   if (hasActiveCall.value) {
+    // ponytail: keep this call out of the pause that hanging up starts, delete
+    // when Chatwoot ships server-side call availability.
+    markLocalCall(call.callSid);
     await handleEndCall();
   }
 

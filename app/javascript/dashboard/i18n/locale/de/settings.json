@@ -391,6 +391,15 @@
       "SETTINGS": "Einstellungen"
     },
     "CHANNELS": "Kanäle",
+    "RECEIVE_CALLS": {
+      "TEXT": "Anrufe annehmen",
+      "INFO_SHORT": "Eingehende Anrufe in diesem Browser klingeln lassen."
+    },
+    "CALL_PAUSE": {
+      "TEXT": "Pause nach einem Anruf",
+      "OFF": "Aus",
+      "MINUTES": "{count} Min."
+    },
     "SET_AUTO_OFFLINE": {
       "TEXT": "Automatisch offline markieren",
       "INFO_TEXT": "Lassen Sie sich vom System automatisch als offline markieren, wenn Sie die App oder das Dashboard nicht verwenden.",

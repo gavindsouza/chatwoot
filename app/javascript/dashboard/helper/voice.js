@@ -75,13 +75,77 @@ const shouldShowCall = ({
   return !isAssignedToAnotherAgent(assigneeId, currentUserId);
 };
 
+// ponytail: per-browser "Receive calls" (default off) and "Pause after a call"
+// (default 2 min) from the status menu, delete when Chatwoot ships server-side,
+// admin-configurable call availability (SwitchUp req 1, 2.4, 2.5).
+// Read on every decision, so a change applies at once and in every tab.
+export const RECEIVE_CALLS_KEY = 'voiceReceiveCalls';
+export const CALL_PAUSE_MINUTES_KEY = 'voiceCallPauseMinutes';
+const CALL_ENDED_AT_KEY = 'voiceCallEndedAt';
+
+export const readVoiceSetting = (key, fallback) => {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(key));
+    return typeof value === typeof fallback ? value : fallback;
+  } catch {
+    return fallback;
+  }
+};
+export const writeVoiceSetting = (key, value) => {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // private mode: the defaults stay in force
+  }
+};
+const callPauseLeft = () =>
+  readVoiceSetting(CALL_ENDED_AT_KEY, 0) +
+  readVoiceSetting(CALL_PAUSE_MINUTES_KEY, 2) * 60 * 1000 -
+  Date.now();
+// Runs `offer` once the pause is over (it can restart meanwhile), unless the
+// call was taken or ended in the meantime. Looks again every few seconds so a
+// shortened pause releases the call without waiting out the old one.
+const offerAfterPause = (callSid, offer) => {
+  const pauseLeft = callPauseLeft();
+  if (pauseLeft > 0) {
+    setTimeout(
+      () => offerAfterPause(callSid, offer),
+      Math.min(pauseLeft, 5000)
+    );
+  } else if (!dismissedCallSids.has(callSid)) {
+    offer();
+  }
+};
+export const markCallEnded = () => {
+  writeVoiceSetting(CALL_ENDED_AT_KEY, Date.now());
+  if (callPauseLeft() <= 0) return;
+  // Calls that stacked up silently during the call would ring the moment it
+  // ends, so they wait for the pause too, except the one the agent is
+  // switching to (FloatingCallWidget marks it local before hanging up).
+  const callsStore = useCallsStore();
+  callsStore.incomingCalls
+    .filter(call => isInbound(call.callDirection) && !isLocalCall(call.callSid))
+    .forEach(call => {
+      callsStore.dismissCall(call.callSid);
+      offerAfterPause(call.callSid, () => {
+        if (readVoiceSetting(RECEIVE_CALLS_KEY, false)) {
+          callsStore.addCall(call);
+        }
+      });
+    });
+};
+
 // Offline/busy agents shouldn't get a ringing popup for inbound calls, but
 // outbound calls always belong to the initiator regardless of their status,
 // and existing (already-surfaced) calls keep going so a status change
 // mid-call doesn't yank away an active widget.
-const shouldRingInbound = (callDirection, currentUserAvailability) => {
+export const shouldRingInbound = (callDirection, currentUserAvailability) => {
   if (callDirection === 'outbound') return true;
-  return currentUserAvailability === 'online';
+  return (
+    currentUserAvailability === 'online' &&
+    readVoiceSetting(RECEIVE_CALLS_KEY, false) &&
+    callPauseLeft() <= 0
+  );
 };
 
 function extractCallerSnapshot(message) {
@@ -155,7 +219,16 @@ export function handleVoiceCallCreated(
     return;
   }
 
-  if (!shouldRingInbound(callDirection, currentUserAvailability)) return;
+  if (!shouldRingInbound(callDirection, currentUserAvailability)) {
+    // ponytail: a call held back by the pause is offered when the pause ends,
+    // delete when Chatwoot ships server-side call availability.
+    if (callPauseLeft() > 0) {
+      offerAfterPause(callSid, () =>
+        handleVoiceCallCreated(message, currentUserId, currentUserAvailability)
+      );
+    }
+    return;
+  }
 
   const callsStore = useCallsStore();
   callsStore.addCall({
@@ -169,6 +242,19 @@ export function handleVoiceCallCreated(
     caller: extractCallerSnapshot(message),
   });
 }
+
+// Turning Receive calls on offers the calls that rang while it was off, the
+// way the hydration seeding in useCallSession does on a refresh.
+export const offerRingingCalls = ({ getters }) =>
+  (getters.getAllConversations || []).forEach(conversation =>
+    (conversation.messages || []).forEach(message =>
+      handleVoiceCallCreated(
+        message,
+        getters.getCurrentUserID,
+        getters.getCurrentUserAvailability
+      )
+    )
+  );
 
 export function handleVoiceCallUpdated(
   commit,

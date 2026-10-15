@@ -26,6 +26,7 @@ import CopilotContainer from 'dashboard/components/copilot/CopilotContainer.vue'
 
 import MobileSidebarLauncher from 'dashboard/components-next/sidebar/MobileSidebarLauncher.vue';
 import { useCallsStore } from 'dashboard/stores/calls';
+import { markCallEnded } from 'dashboard/helper/voice';
 
 export default {
   components: {
@@ -85,6 +86,11 @@ export default {
     },
   },
   watch: {
+    // ponytail: start "Pause after a call" when this tab's connected call ends,
+    // delete when Chatwoot ships server-side call availability (SwitchUp req 2.5).
+    hasActiveCall(active, wasActive) {
+      if (wasActive && !active) markCallEnded();
+    },
     isSmallScreen: {
       handler() {
         const { LAYOUT_TYPES } = wootConstants;

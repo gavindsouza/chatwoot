@@ -399,6 +399,15 @@
       "SETTINGS": "Settings"
     },
     "CHANNELS": "Channels",
+    "RECEIVE_CALLS": {
+      "TEXT": "Receive calls",
+      "INFO_SHORT": "Ring incoming calls in this browser."
+    },
+    "CALL_PAUSE": {
+      "TEXT": "Pause after a call",
+      "OFF": "Off",
+      "MINUTES": "{count} min"
+    },
     "SET_AUTO_OFFLINE": {
       "TEXT": "Mark offline automatically",
       "INFO_TEXT": "Let the system automatically mark you offline when you aren't using the app or dashboard.",

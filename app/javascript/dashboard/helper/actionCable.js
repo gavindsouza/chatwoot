@@ -12,7 +12,11 @@ import {
   isLocalWhatsappCall,
 } from 'dashboard/composables/useWhatsappCallSession';
 import { VOICE_CALL_PROVIDERS } from 'dashboard/helper/inbox';
-import { markCallDismissed, isLocalCall } from 'dashboard/helper/voice';
+import {
+  markCallDismissed,
+  isLocalCall,
+  shouldRingInbound,
+} from 'dashboard/helper/voice';
 import { VOICE_CALL_DIRECTION } from 'dashboard/components-next/message/constants';
 import { FEATURE_FLAGS } from 'dashboard/featureFlags';
 
@@ -441,7 +445,9 @@ class ActionCableConnector extends BaseActionCableConnector {
     // but if anything ever broadcasts to a broader stream (e.g. account-wide),
     // an agent who's set availability=offline/busy shouldn't ring.
     const availability = this.app.$store.getters.getCurrentUserAvailability;
-    if (availability !== 'online') return;
+    // ponytail: also honour "Receive calls" and the pause, delete when Chatwoot
+    // ships server-side call availability.
+    if (!shouldRingInbound(VOICE_CALL_DIRECTION.INBOUND, availability)) return;
 
     useCallsStore().addCall({
       callSid: data.call_id,

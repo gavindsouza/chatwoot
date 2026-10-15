@@ -1,10 +1,18 @@
 <script setup>
-import { computed, h } from 'vue';
+import { computed, h, ref, watch } from 'vue';
 import { useMapGetter, useStore } from 'dashboard/composables/store';
 import wootConstants from 'dashboard/constants/globals';
 import { useAlert } from 'dashboard/composables';
 import { useI18n } from 'vue-i18n';
 import { useImpersonation } from 'dashboard/composables/useImpersonation';
+import { isVoiceCallEnabled } from 'dashboard/helper/inbox';
+import {
+  RECEIVE_CALLS_KEY,
+  CALL_PAUSE_MINUTES_KEY,
+  offerRingingCalls,
+  readVoiceSetting,
+  writeVoiceSetting,
+} from 'dashboard/helper/voice';
 
 import {
   DropdownContainer,
@@ -15,6 +23,7 @@ import {
 import Icon from 'next/icon/Icon.vue';
 import Button from 'next/button/Button.vue';
 import ToggleSwitch from 'dashboard/components-next/switch/Switch.vue';
+import Select from 'dashboard/components-next/select/Select.vue';
 
 const { t } = useI18n();
 const store = useStore();
@@ -58,6 +67,28 @@ const autoOfflineToggle = computed({
     });
   },
 });
+
+// ponytail: per-browser call settings (see helper/voice.js), delete when
+// Chatwoot ships server-side call availability (SwitchUp req 1, 2.4, 2.5).
+const inboxes = useMapGetter('inboxes/getInboxes');
+const hasVoiceInbox = computed(() => inboxes.value.some(isVoiceCallEnabled));
+const receiveCalls = ref(readVoiceSetting(RECEIVE_CALLS_KEY, false));
+const callPauseMinutes = ref(readVoiceSetting(CALL_PAUSE_MINUTES_KEY, 2));
+watch(receiveCalls, value => {
+  writeVoiceSetting(RECEIVE_CALLS_KEY, value);
+  if (value) offerRingingCalls(store);
+});
+watch(callPauseMinutes, value =>
+  writeVoiceSetting(CALL_PAUSE_MINUTES_KEY, value)
+);
+const callPauseOptions = computed(() =>
+  [0, 1, 2, 3, 5].map(minutes => ({
+    value: minutes,
+    label: minutes
+      ? t('SIDEBAR.CALL_PAUSE.MINUTES', { count: minutes })
+      : t('SIDEBAR.CALL_PAUSE.OFF'),
+  }))
+);
 
 function changeAvailabilityStatus(availability) {
   if (isImpersonating.value) {
@@ -125,6 +156,29 @@ function changeAvailabilityStatus(availability) {
         </div>
         <ToggleSwitch v-model="autoOfflineToggle" />
       </DropdownItem>
+      <template v-if="hasVoiceInbox">
+        <DropdownItem preserve-open>
+          <div class="flex-grow min-w-0">
+            {{ $t('SIDEBAR.RECEIVE_CALLS.TEXT') }}
+            <Icon
+              v-tooltip.top="$t('SIDEBAR.RECEIVE_CALLS.INFO_SHORT')"
+              icon="i-lucide-info"
+              class="inline-block align-middle ms-1 size-4 text-n-slate-10"
+            />
+          </div>
+          <ToggleSwitch v-model="receiveCalls" />
+        </DropdownItem>
+        <DropdownItem preserve-open class="gap-1">
+          <div class="flex-grow min-w-0">
+            {{ $t('SIDEBAR.CALL_PAUSE.TEXT') }}
+          </div>
+          <Select
+            v-model="callPauseMinutes"
+            :options="callPauseOptions"
+            :aria-label="$t('SIDEBAR.CALL_PAUSE.TEXT')"
+          />
+        </DropdownItem>
+      </template>
     </div>
   </DropdownSection>
 </template>
