@@ -451,6 +451,134 @@ describe('ReplyBox', () => {
     });
   });
 
+  describe('Twilio voice call conversations', () => {
+    const VOICE_INBOX = {
+      channel_type: 'Channel::TwilioSms',
+      medium: 'sms',
+      voice_enabled: true,
+    };
+    const CALL = { id: 10, content_type: 'voice_call' };
+    const TEXT = { id: 11, content_type: 'text' };
+    const callChat = chat => ({ ...REPLIABLE, messages: [CALL], ...chat });
+    const pickMode = (wrapper, mode) =>
+      wrapper
+        .findComponent({ name: 'ReplyTopPanel' })
+        .vm.$emit('setReplyMode', mode);
+
+    it('opens in note mode when the conversation has a call', () => {
+      const { wrapper, store } = mountWith({
+        inbox: VOICE_INBOX,
+        chat: { messages: [TEXT, CALL] },
+      });
+
+      expect(bottomPanel(wrapper).isOnPrivateNote).toBe(true);
+      expect(store.getters['draftMessages/getReplyEditorMode']).toBe(
+        REPLY_EDITOR_MODES.NOTE
+      );
+    });
+
+    it.each([
+      ['has no call', VOICE_INBOX, { messages: [TEXT] }],
+      [
+        'is on an SMS inbox without voice',
+        { ...VOICE_INBOX, voice_enabled: false },
+        { messages: [CALL] },
+      ],
+      [
+        'is on another channel',
+        { channel_type: 'Channel::WebWidget', voice_enabled: true },
+        { messages: [CALL] },
+      ],
+    ])('opens in reply mode when the conversation %s', (_, inbox, chat) => {
+      const { wrapper } = mountWith({ inbox, chat });
+
+      expect(bottomPanel(wrapper).isOnPrivateNote).toBe(false);
+    });
+
+    it('loads the note draft', async () => {
+      const { wrapper } = mountWith({
+        inbox: VOICE_INBOX,
+        chat: { messages: [CALL] },
+        drafts: { 'draft-1-REPLY': 'a reply', 'draft-1-NOTE': 'a note' },
+      });
+      await nextTick();
+
+      expect(editor(wrapper)).toMatchObject({
+        editorId: 'draft-1-NOTE',
+        modelValue: 'a note',
+      });
+    });
+
+    it('switches to note mode once the call message loads', async () => {
+      const { wrapper, store } = mountWith({ inbox: VOICE_INBOX });
+      expect(bottomPanel(wrapper).isOnPrivateNote).toBe(false);
+
+      store.commit('selectChat', callChat({ messages: [TEXT, CALL] }));
+      await nextTick();
+
+      expect(bottomPanel(wrapper).isOnPrivateNote).toBe(true);
+    });
+
+    it('keeps the reply mode the agent picked when more messages arrive', async () => {
+      const { wrapper, store } = mountWith({
+        inbox: VOICE_INBOX,
+        chat: { messages: [CALL] },
+      });
+      pickMode(wrapper, REPLY_EDITOR_MODES.REPLY);
+      await nextTick();
+      expect(bottomPanel(wrapper).isOnPrivateNote).toBe(false);
+
+      store.commit('selectChat', callChat({ messages: [CALL, TEXT] }));
+      await nextTick();
+      store.commit('selectChat', callChat({ messages: [CALL, TEXT, CALL] }));
+      await nextTick();
+
+      expect(bottomPanel(wrapper).isOnPrivateNote).toBe(false);
+    });
+
+    it('starts the next call conversation in note mode again', async () => {
+      const { wrapper, store } = mountWith({
+        inbox: VOICE_INBOX,
+        chat: { messages: [CALL] },
+      });
+      pickMode(wrapper, REPLY_EDITOR_MODES.REPLY);
+      await nextTick();
+
+      store.commit('selectChat', callChat({ id: 2 }));
+      await nextTick();
+
+      expect(bottomPanel(wrapper).isOnPrivateNote).toBe(true);
+    });
+
+    it('does not carry the note default into a conversation without a call', async () => {
+      const { wrapper, store } = mountWith({
+        inbox: VOICE_INBOX,
+        chat: { messages: [CALL] },
+      });
+      expect(bottomPanel(wrapper).isOnPrivateNote).toBe(true);
+
+      store.commit('selectChat', callChat({ id: 2, messages: [TEXT] }));
+      await nextTick();
+
+      expect(bottomPanel(wrapper).isOnPrivateNote).toBe(false);
+      expect(editor(wrapper).editorId).toBe('draft-2-REPLY');
+    });
+
+    it('keeps a note the agent chose when they leave the call conversation', async () => {
+      const { wrapper, store } = mountWith({
+        inbox: VOICE_INBOX,
+        chat: { messages: [CALL] },
+      });
+      pickMode(wrapper, REPLY_EDITOR_MODES.NOTE);
+      await nextTick();
+
+      store.commit('selectChat', callChat({ id: 2, messages: [TEXT] }));
+      await nextTick();
+
+      expect(bottomPanel(wrapper).isOnPrivateNote).toBe(true);
+    });
+  });
+
   describe('send shortcut', () => {
     const pressEnter = init =>
       document.dispatchEvent(

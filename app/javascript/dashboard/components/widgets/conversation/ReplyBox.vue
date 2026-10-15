@@ -18,6 +18,7 @@ import MessageSignatureMissingAlert from './MessageSignatureMissingAlert.vue';
 import ReplyBoxBanner from './ReplyBoxBanner.vue';
 import QuotedEmailPreview from './QuotedEmailPreview.vue';
 import { REPLY_EDITOR_MODES } from 'dashboard/components/widgets/WootWriter/constants';
+import { CONTENT_TYPES } from 'dashboard/components-next/message/constants.js';
 import WootMessageEditor from 'dashboard/components/widgets/WootWriter/Editor.vue';
 import AudioRecorder from 'dashboard/components/widgets/WootWriter/AudioRecorder.vue';
 import { AUDIO_FORMATS } from 'shared/constants/messages';
@@ -171,6 +172,7 @@ export default {
       recordingAudioState: '',
       recordingAudioDurationText: '',
       replyType: REPLY_EDITOR_MODES.REPLY,
+      callNoteDefault: false,
       draftConversationId: null,
       draftReplyMode: null,
       bccEmails: '',
@@ -253,6 +255,14 @@ export default {
     },
     isInstagramReplyRestricted() {
       return this.isMetaMessageSendingDisabled && this.isAnInstagramChannel;
+    },
+    voiceCallChatId() {
+      const hasCall = this.currentChat?.messages?.some(
+        message => message.content_type === CONTENT_TYPES.VOICE_CALL
+      );
+      return hasCall && this.isATwilioChannel && this.voiceCallEnabled
+        ? this.currentChat.id
+        : null;
     },
     isPrivate() {
       return (
@@ -569,6 +579,22 @@ export default {
         this.setCCAndToEmailsFromLastChat();
       },
       deep: true,
+    },
+    // ponytail: opens Twilio call conversations on Private note, delete when Chatwoot ships a call-conversation reply default
+    voiceCallChatId: {
+      immediate: true,
+      handler(chatId) {
+        if (chatId) {
+          this.replyType = REPLY_EDITOR_MODES.NOTE;
+          this.callNoteDefault = true;
+        } else if (this.callNoteDefault) {
+          // Do not carry the default into a conversation that is not a call.
+          this.callNoteDefault = false;
+          this.replyType = this.isWithinMessagingWindow
+            ? REPLY_EDITOR_MODES.REPLY
+            : REPLY_EDITOR_MODES.NOTE;
+        }
+      },
     },
     conversationIdByRoute(conversationId, oldConversationId) {
       if (conversationId !== oldConversationId) {
@@ -1011,6 +1037,7 @@ export default {
       this.hideContentTemplatesModal();
     },
     setReplyMode(mode = REPLY_EDITOR_MODES.REPLY) {
+      this.callNoteDefault = false;
       // Clear attachments when switching between private note and reply modes
       // This is to prevent from breaking the upload rules
       if (this.attachedFiles.length > 0) this.attachedFiles = [];
