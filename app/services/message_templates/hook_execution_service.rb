@@ -4,6 +4,8 @@ class MessageTemplates::HookExecutionService
   def perform
     return if conversation.last_incoming_message.blank?
     return if message.auto_reply_email?
+    # ponytail: a call is not a chat, send no greeting/out-of-office text for it, delete when Chatwoot ships voice-call-aware message templates
+    return if message.voice_call?
 
     trigger_templates
   end

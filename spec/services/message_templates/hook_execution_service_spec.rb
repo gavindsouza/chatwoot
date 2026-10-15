@@ -174,6 +174,20 @@ describe MessageTemplates::HookExecutionService do
     end
   end
 
+  context 'when message is a voice call' do
+    it 'sends no template message even after working hours' do
+      contact = create(:contact)
+      conversation = create(:conversation, contact: contact)
+      conversation.inbox.update(working_hours_enabled: true, out_of_office_message: 'We are out of office',
+                                greeting_enabled: true, greeting_message: 'Hi, this is a greeting message')
+      conversation.inbox.working_hours.today.update!(closed_all_day: true)
+
+      create(:message, conversation: conversation, account: conversation.account, message_type: :incoming, content_type: :voice_call)
+
+      expect(conversation.messages.template).to be_empty
+    end
+  end
+
   context 'when it is after working hours' do
     it 'calls ::MessageTemplates::Template::OutOfOffice' do
       contact = create(:contact)
